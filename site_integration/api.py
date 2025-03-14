@@ -1,18 +1,18 @@
 import frappe
 import requests
+from frappe.utils import formatdate
 
 @frappe.whitelist()
 def export_purchase_order_to_v15(po_name):
 	try:
 		doc = frappe.get_doc("Purchase Order", po_name)
 		config = frappe.get_single("PISPL Configuration")
+		password = config.get_password('password')
 		v15_url = config.url
 		headers = {
-			"Authorization": f"token {config.api_key}:{config.api_secret}",
+			"Authorization": f"token {config.api_key}:{password}",
 			"Content-Type": "application/json"
 		}
-
-		customer = "Advanced Crushing Engineers Private Limited"
 
 		items = []
 		for item in doc.items:
@@ -21,33 +21,68 @@ def export_purchase_order_to_v15(po_name):
 				{"parent": item.item_code},
 				"supplier_part_no"
 			)
-			if not v15_item_code:
-				frappe.log_error(f"Item {item.item_code} has no supplier_part_no", "PO Export Error")
-				continue
 
 			items.append({
 				"item_code": v15_item_code,
 				"qty": item.qty,
-				"rate": item.rate
+				"rate": item.rate,
+				"delivery_date": item.schedule_date.strftime("%Y-%m-%d") if item.schedule_date else None
+			})
+		
+		taxes = []
+		for tax in doc.taxes:
+			taxes.append({
+				"charge_type": tax.charge_type,
+				"account_head": tax.account_head,
+				"rate": tax.rate
 			})
 
-		if not items:
-			frappe.log_error(f"PO {po_name} has no valid items to export", "PO Export Error")
-			return
-
 		payload = {
-			"customer": customer,
-			"items": items
+			"po_name": doc.name,
+			"items": items,
+			"taxes": taxes,
+			"transaction_date": doc.transaction_date.strftime("%Y-%m-%d") if doc.transaction_date else None,
+			"delivery_date": doc.schedule_date.strftime("%Y-%m-%d") if doc.schedule_date else None
 		}
-		response = requests.post(f"{v15_url}/api/resource/Sales Order", json=payload, headers=headers)
+
+		frappe.log_error(title="payload", message=payload)
+
+		response = requests.post(f"{v15_url}/api/method/proman.proman.utils.create_sales_order.create_sales_order", json=payload, headers=headers)
 
 		if response.status_code == 200:
-			frappe.msgprint(f"Sales Order created in PISPL v15 for PO {po_name}")
+			try:
+				response_data = response.json()  # Convert response to JSON
+				frappe.log_error(title="Response Data", message=response_data)
+				sales_order_id = response_data.get("message", {}).get("sales_order_id")
+				frappe.log_error(title="SO Name", message=sales_order_id)
+
+				# Update the Purchase Order in v13 with the Sales Order name
+				frappe.db.set_value("Purchase Order", po_name, "so_name", sales_order_id)
+				frappe.db.commit()  # Commit the changes
+
+				frappe.log_error(f"{response.text}", "PO Export Success")
+				return {"status": "success", "message": f"Sales Order created in PISPL v15 for PO {po_name}"}
+
+			except json.JSONDecodeError:
+				frappe.log_error(f"Invalid JSON response: {response.text}", "PO Export Error")
+				return {"status": "error", "message": "Invalid response format from v15"}
+					
 		else:
-			frappe.log_error(f"Failed to export PO {po_name}: {response.text}", "PO Export Error")
+			# Extract error message
+			try:
+				error_response = response.json()
+				error_message = error_response.get("message", {}).get("error", "Unknown error occurred")
+			except json.JSONDecodeError:
+				error_message = response.text  # Fallback in case response is not JSON
+
+			error_msg = f"Failed to export PO {po_name}: {error_message}"
+			frappe.log_error(error_msg, "PO Export Error")
+			return {"status": "error", "message": error_message}
 
 	except Exception as e:
-		frappe.log_error(f"Error exporting PO {po_name}: {str(e)}", "PO Export Error")
+		error_msg = f"Error exporting PO {po_name}: {str(e)}"
+		frappe.log_error(error_msg, "PO Export Error")
+		return {"status": "error", "message": error_msg}
 
 def validate_supplier_part_number(doc, method):
 
@@ -69,7 +104,20 @@ def validate_supplier_part_number(doc, method):
 
 		if not supplier_part_no:
 			missing_items.append(item.item_code)
-
+	
 	if missing_items:
 		missing_items_str = ", ".join(missing_items)
-		frappe.throw(f"Missing Supplier Part Numbers in: <br> {missing_items_str}")
+
+		error_message = f"Missing Supplier Part Numbers in: {missing_items_str}"
+		log = frappe.log_error(error_message, "Supplier Part Number missing")
+
+		log_name = log.name if log else ""
+
+		error_log_link = (
+			f'<a href="/app/error-log/{log_name}" target="_blank">View Error Log</a>'
+			if log_name
+			else "Check Error Log for details."
+		)
+
+		error_message = f"Missing Supplier Part Numbers in: <br> {missing_items_str}"
+		frappe.throw(f"{error_message}<br>{error_log_link}")
