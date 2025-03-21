@@ -75,13 +75,18 @@ def export_purchase_order_to_v15(po_name):
 			except json.JSONDecodeError:
 				error_message = response.text  # Fallback in case response is not JSON
 
-			error_msg = f"Failed to export PO {po_name}: {error_message}"
-			frappe.log_error(error_msg, "PO Export Error")
+			error_msg = f"Failed to create SO for the PO {po_name}: {error_message}"
+			frappe.log_error(error_msg, "SO Creation Error")
 			return {"status": "error", "message": error_message}
 
+	except requests.ConnectionError:
+		error_msg = f"Could not connect to PISPL v15 site. Please ensure the site is running and try again."
+		frappe.log_error(error_msg, "v15 Connection Error on SO creation")
+		frappe.throw(error_msg)
+	
 	except Exception as e:
-		error_msg = f"Error exporting PO {po_name}: {str(e)}"
-		frappe.log_error(error_msg, "PO Export Error")
+		error_msg = f"Error creating SO for the PO {po_name}: {str(e)}"
+		frappe.log_error(error_msg, "SO Creation Error")
 		return {"status": "error", "message": error_msg}
 
 def validate_supplier_part_number(doc, method):
@@ -160,9 +165,14 @@ def cancel_sales_order_in_v15(doc, method):
 			frappe.throw(f"Sales Order {doc.so_name} cancellation failed in PISPL v15")
 			return
 
+	except requests.ConnectionError:
+		error_msg = f"Could not connect to PISPL v15 site. Please ensure the site is running before cancelling the PO."
+		frappe.log_error(error_msg, "v15 Connection Error on SO Cancel")
+		frappe.throw(error_msg)
+
 	except Exception as e:
 		frappe.log_error(f"Error canceling SO {doc.so_name}: {str(e)}", "SO Cancel Error2")
-		return
+		frappe.throw(f"Error canceling Sales Order {doc.so_name} in PISPL v15")
 
 def export_amended_purchase_order_to_v15(po_name):
 	try:
@@ -236,10 +246,14 @@ def export_amended_purchase_order_to_v15(po_name):
 			frappe.log_error(f"Failed to amend PO {po_name}: {error_message}", "PO Amend Error")
 			return {"status": "error", "message": error_message}
 
+	except requests.ConnectionError:
+		error_msg = f"Could not connect to PISPL v15 site. Ensure the site is running before amending the PO."
+		frappe.log_error(error_msg, "v15 Connection Error on PO amend")
+		frappe.throw(error_msg)
+	
 	except Exception as e:
 		frappe.log_error(f"Error amending PO {po_name}: {str(e)}", "PO Amend Error")
-		return {"status": "error", "message": str(e)}
-
+		frappe.throw(f"Error amending PO {po_name} in PISPL v15")
 
 def trigger_po_amendment_sync(doc, method):
 	frappe.log_error(title="Triggering PO amendment sync")
