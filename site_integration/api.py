@@ -16,14 +16,9 @@ def export_purchase_order_to_v15(po_name):
 
 		items = []
 		for item in doc.items:
-			v15_item_code = frappe.db.get_value(
-				"Item Supplier",
-				{"parent": item.item_code},
-				"supplier_part_no"
-			)
 
 			items.append({
-				"item_code": v15_item_code,
+				"item_code": item.supplier_part_no,
 				"qty": item.qty,
 				"rate": item.rate,
 				"delivery_date": item.schedule_date.strftime("%Y-%m-%d") if item.schedule_date else None
@@ -45,38 +40,31 @@ def export_purchase_order_to_v15(po_name):
 			"delivery_date": doc.schedule_date.strftime("%Y-%m-%d") if doc.schedule_date else None
 		}
 
-		frappe.log_error(title="payload", message=payload)
-
-		response = requests.post(f"{v15_url}/api/method/proman.proman.utils.create_sales_order.create_sales_order", json=payload, headers=headers)
+		response = requests.post(f"{v15_url}/api/method/proman.proman.utils.sales_order.create_sales_order", json=payload, headers=headers)
 
 		if response.status_code == 200:
 			try:
-				response_data = response.json()  # Convert response to JSON
-				frappe.log_error(title="Response Data", message=response_data)
+				response_data = response.json()
 				sales_order_id = response_data.get("message", {}).get("sales_order_id")
-				frappe.log_error(title="SO Name", message=sales_order_id)
 
-				# Update the Purchase Order in v13 with the Sales Order name
 				frappe.db.set_value("Purchase Order", po_name, "so_name", sales_order_id)
-				frappe.db.commit()  # Commit the changes
+				frappe.db.commit()
 
-				frappe.log_error(f"{response.text}", "PO Export Success")
 				return {"status": "success", "message": f"Sales Order created in PISPL v15 for PO {po_name}"}
 
 			except json.JSONDecodeError:
-				frappe.log_error(f"Invalid JSON response: {response.text}", "PO Export Error")
+				frappe.log_error(f"Invalid JSON response: {response.text}", "SO Creation Error")
 				return {"status": "error", "message": "Invalid response format from v15"}
-					
+		
 		else:
-			# Extract error message
 			try:
 				error_response = response.json()
 				error_message = error_response.get("message", {}).get("error", "Unknown error occurred")
 			except json.JSONDecodeError:
-				error_message = response.text  # Fallback in case response is not JSON
+				error_message = response.text
 
 			error_msg = f"Failed to create SO for the PO {po_name}: {error_message}"
-			frappe.log_error(error_msg, "SO Creation Error")
+			frappe.log_error(title="SO Creation Error", message=error_msg)
 			return {"status": "error", "message": error_message}
 
 	except requests.ConnectionError:
@@ -91,8 +79,6 @@ def export_purchase_order_to_v15(po_name):
 
 def validate_supplier_part_number(doc, method):
 
-	"""Ensure all items have a Supplier Part Number when supplier is 'Proman Infrastructure Services Private Limited'"""
-	
 	supplier_name = "Proman Infrastructure Services Private Limited"
 	
 	if doc.supplier != supplier_name:
@@ -138,10 +124,8 @@ def cancel_sales_order_in_v15(doc, method):
 
 	try:
 		if not doc.so_name:
-			frappe.msgprint("No linked Sales Order found to cancel in PISPL site")
 			return
 
-		# Fetch v15 API credentials
 		config = frappe.get_single("PISPL Configuration")
 		password = config.get_password('password')
 		v15_url = config.url
@@ -153,12 +137,11 @@ def cancel_sales_order_in_v15(doc, method):
 
 		payload = {"sales_order_name": doc.so_name}
 
-		response = requests.post(f"{v15_url}/api/method/proman.proman.utils.create_sales_order.cancel_sales_order", json=payload, headers=headers)
+		response = requests.post(f"{v15_url}/api/method/proman.proman.utils.sales_order.cancel_sales_order", json=payload, headers=headers)
 
 		if response.status_code == 200:
 			response_data = response.json()
-			frappe.log_error(title="SO Cancel Success in PISPL v15", message=response_data)
-			frappe.msgprint(f"Sales Order {doc.so_name} cancelled in PISPL v15 too!")
+			frappe.msgprint(response_data.get("message", {}).get("message"))
 			return
 
 		else:
@@ -166,7 +149,6 @@ def cancel_sales_order_in_v15(doc, method):
 			error_message = error_response.get("message", "Unknown error occurred")
 			frappe.log_error(f"Failed to cancel SO {doc.so_name}: {error_message}", "SO Cancel Error")
 			frappe.throw(f"Sales Order {doc.so_name} cancellation failed in PISPL v15")
-			return
 
 	except requests.ConnectionError:
 		error_msg = f"Could not connect to PISPL v15 site. Please ensure the site is running before cancelling the PO."
@@ -174,17 +156,15 @@ def cancel_sales_order_in_v15(doc, method):
 		frappe.throw(error_msg)
 
 	except Exception as e:
-		frappe.log_error(f"Error canceling SO {doc.so_name}: {str(e)}", "SO Cancel Error2")
-		frappe.throw(f"Error canceling Sales Order {doc.so_name} in PISPL v15")
+		frappe.log_error(f"Error cancelling SO {doc.so_name}: {str(e)}", "SO Cancel Error")
+		frappe.throw(f"Error cancelling Sales Order {doc.so_name} in PISPL v15 site")
 
 def export_amended_purchase_order_to_v15(po_name):
 	try:
-		frappe.log_error(title="Amending PO")
 		doc = frappe.get_doc("Purchase Order", po_name)
 		
-		# Ensure the PO has a linked SO
 		if not doc.so_name:
-			frappe.msgprint("No linked Sales Order found to amend in PISPL site.")
+			frappe.msgprint("No linked Sales Order found to amend in PISPL v15 site.")
 			return
 		
 		config = frappe.get_single("PISPL Configuration")
@@ -198,11 +178,6 @@ def export_amended_purchase_order_to_v15(po_name):
 
 		items = []
 		for item in doc.items:
-			# v15_item_code = frappe.db.get_value(
-			# 	"Item Supplier",
-			# 	{"parent": item.item_code},
-			# 	"supplier_part_no"
-			# )
 
 			items.append({
 				"item_code": item.supplier_part_no,
@@ -220,34 +195,31 @@ def export_amended_purchase_order_to_v15(po_name):
 			})
 
 		payload = {
-			"old_so_name": doc.so_name,  # Pass old SO name for reference
-			"new_po_name": doc.name,  # New amended PO name
+			"old_so_name": doc.so_name,
+			"new_po_name": doc.name,
 			"items": items,
 			"taxes": taxes,
 			"transaction_date": doc.transaction_date.strftime("%Y-%m-%d") if doc.transaction_date else None,
 			"delivery_date": doc.schedule_date.strftime("%Y-%m-%d") if doc.schedule_date else None
 		}
 
-		response = requests.post(f"{v15_url}/api/method/proman.proman.utils.create_sales_order.amend_sales_order", json=payload, headers=headers)
+		response = requests.post(f"{v15_url}/api/method/proman.proman.utils.sales_order.amend_sales_order", json=payload, headers=headers)
 
 		if response.status_code == 200:
 			response_data = response.json()
 			curr_so_name = doc.so_name
-			frappe.log_error(title="Response Data", message=response_data)
 			new_sales_order_id = response_data.get("message", {}).get("new_sales_order_id")
 
-			# if new_sales_order_id:
 			frappe.db.set_value("Purchase Order", po_name, "so_name", new_sales_order_id)
 			frappe.db.commit()
 
-			# return {"status": "success", "message": f"Amended Sales Order {new_sales_order_id} created for PO {po_name}"}
-
-			frappe.msgprint(f"Sales Order {curr_so_name} amended in PISPL v15 too!")
+			frappe.msgprint(f"Sales Order {curr_so_name} amended in PISPL v15 site too!")
 
 		else:
 			error_message = response.json().get("message", "Unknown error occurred")
 			frappe.log_error(f"Failed to amend PO {po_name}: {error_message}", "PO Amend Error")
-			return {"status": "error", "message": error_message}
+			frappe.throw(error_message)
+			frappe.log("Came here amending PO", error_message)
 
 	except requests.ConnectionError:
 		error_msg = f"Could not connect to PISPL v15 site. Ensure the site is running before amending the PO."
@@ -259,9 +231,6 @@ def export_amended_purchase_order_to_v15(po_name):
 		frappe.throw(f"Error amending PO {po_name} in PISPL v15")
 
 def trigger_po_amendment_sync(doc, method):
-	frappe.log_error(title="Triggering PO amendment sync")
-	
-	"""Hook function to trigger amendment sync when a PO is amended."""
 	if doc.amended_from:
 		supplier_name = "Proman Infrastructure Services Private Limited"
 	
