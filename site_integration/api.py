@@ -133,9 +133,12 @@ def cancel_sales_order_in_v15(doc, method):
 	if doc.supplier != supplier_name:
 		return
 	
+	if not frappe.get_roles(frappe.session.user).count("System Manager"):
+		frappe.throw("You do not have permission to cancel this Purchase Order. Only System Managers can cancel POs of this supplier.")
+
 	try:
 		if not doc.so_name:
-			frappe.msgprint("No linked Sales Order found in PISPL site")
+			frappe.msgprint("No linked Sales Order found to cancel in PISPL site")
 			return
 
 		# Fetch v15 API credentials
@@ -179,6 +182,11 @@ def export_amended_purchase_order_to_v15(po_name):
 		frappe.log_error(title="Amending PO")
 		doc = frappe.get_doc("Purchase Order", po_name)
 		
+		# Ensure the PO has a linked SO
+		if not doc.so_name:
+			frappe.msgprint("No linked Sales Order found to amend in PISPL site.")
+			return
+		
 		config = frappe.get_single("PISPL Configuration")
 		password = config.get_password('password')
 		v15_url = config.url
@@ -187,11 +195,6 @@ def export_amended_purchase_order_to_v15(po_name):
 			"Authorization": f"token {config.api_key}:{password}",
 			"Content-Type": "application/json"
 		}
-
-		# Ensure the PO has a linked SO
-		if not doc.so_name:
-			frappe.msgprint("No linked Sales Order found in PISPL site.")
-			return
 
 		items = []
 		for item in doc.items:
@@ -257,7 +260,16 @@ def export_amended_purchase_order_to_v15(po_name):
 
 def trigger_po_amendment_sync(doc, method):
 	frappe.log_error(title="Triggering PO amendment sync")
+	
 	"""Hook function to trigger amendment sync when a PO is amended."""
 	if doc.amended_from:
+		supplier_name = "Proman Infrastructure Services Private Limited"
+	
+		if doc.supplier != supplier_name:
+			return
+
+		if not frappe.get_roles(frappe.session.user).count("System Manager"):
+			frappe.throw("You do not have permission to cancel this Purchase Order. Only System Managers can cancel POs of this supplier.")
+
 		export_amended_purchase_order_to_v15(doc.name)
 		doc.reload()
