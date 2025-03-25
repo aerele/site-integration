@@ -1,9 +1,9 @@
 from . import __version__ as app_version
 
 app_name = "site_integration"
-app_title = "Site Integration"
+app_title = "Inter-Company PO-SO Sync"
 app_publisher = "Chethan"
-app_description = "Acepl V13 to Pispl V15 Site Integration"
+app_description = "Acepl V13 to Pispl V15 PO-SO Sync"
 app_icon = "octicon octicon-file-directory"
 app_color = "grey"
 app_email = "chethan@aerele.in"

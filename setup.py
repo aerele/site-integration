@@ -9,7 +9,7 @@ from site_integration import __version__ as version
 setup(
 	name="site_integration",
 	version=version,
-	description="Acepl V13 to Pispl V15 Site Integration",
+	description="Acepl V13 to Pispl V15 PO-SO Sync",
 	author="Chethan",
 	author_email="chethan@aerele.in",
 	packages=find_packages(),
